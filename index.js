@@ -1,39 +1,36 @@
+var assert = require('assert')
 var createHash = require('create-hash')
-var pbkdf2 = require('pbkdf2').pbkdf2Sync
-var randomBytes = require('randombytes')
-
-// use unorm until String.prototype.normalize gets better browser support
+var pbkdf2 = require('react-native-crypto').pbkdf2Sync
+var randomBytes = require('react-native-randombytes').randomBytes
 var unorm = require('unorm')
 
 var DEFAULT_WORDLIST = require('./wordlists/en.json')
-var JAPANESE_WORDLIST = require('./wordlists/ja.json')
 
-function salt (password) {
-  return 'mnemonic' + (password || '')
-}
-
-function mnemonicToSeed (mnemonic, password) {
-  var mnemonicBuffer = new Buffer(unorm.nfkd(mnemonic), 'utf8')
-  var saltBuffer = new Buffer(salt(unorm.nfkd(password)), 'utf8')
+function mnemonicToSeed(mnemonic, password) {
+  var mnemonicBuffer = new Buffer(mnemonic, 'utf8')
+  var saltBuffer = new Buffer(salt(password), 'utf8')
 
   return pbkdf2(mnemonicBuffer, saltBuffer, 2048, 64, 'sha512')
 }
 
-function mnemonicToSeedHex (mnemonic, password) {
+function mnemonicToSeedHex(mnemonic, password) {
   return mnemonicToSeed(mnemonic, password).toString('hex')
 }
 
-function mnemonicToEntropy (mnemonic, wordlist) {
+function mnemonicToEntropy(mnemonic, wordlist) {
   wordlist = wordlist || DEFAULT_WORDLIST
 
-  var words = unorm.nfkd(mnemonic).split(' ')
-  if (words.length % 3 !== 0) throw new Error('Invalid mnemonic')
-  if (words.some(function (word) {
-    return wordlist.indexOf(word) === -1
-  })) throw new Error('Invalid mnemonic')
+  var words = mnemonic.split(' ')
+  assert(words.length % 3 === 0, 'Invalid mnemonic')
+
+  var belongToList = words.every(function(word) {
+    return wordlist.indexOf(word) > -1
+  })
+
+  assert(belongToList, 'Invalid mnemonic')
 
   // convert word indices to 11 bit binary strings
-  var bits = words.map(function (word) {
+  var bits = words.map(function(word) {
     var index = wordlist.indexOf(word)
     return lpad(index.toString(2), '0', 11)
   }).join('')
@@ -44,28 +41,18 @@ function mnemonicToEntropy (mnemonic, wordlist) {
   var checksum = bits.slice(dividerIndex)
 
   // calculate the checksum and compare
-  var entropyBytes = entropy.match(/(.{1,8})/g).map(function (bin) {
+  var entropyBytes = entropy.match(/(.{1,8})/g).map(function(bin) {
     return parseInt(bin, 2)
   })
   var entropyBuffer = new Buffer(entropyBytes)
   var newChecksum = checksumBits(entropyBuffer)
 
-  // recreate properly chunked and padded bits to get the properly padded checksum
-  var bits2 = (entropy + newChecksum).match(/(.{1,11})/g).map(function (index) {
-    return lpad(index, '0', 11)
-  }).join('')
-
-  var dividerIndex2 = Math.floor(bits2.length / 33) * 32
-  var newChecksum2 = bits2.slice(dividerIndex2)
-
-  if (newChecksum2 !== checksum) {
-    throw new Error('Invalid mnemonic checksum')
-  }
+  assert(newChecksum === checksum, 'Invalid mnemonic checksum')
 
   return entropyBuffer.toString('hex')
 }
 
-function entropyToMnemonic (entropy, wordlist) {
+function entropyToMnemonic(entropy, wordlist) {
   wordlist = wordlist || DEFAULT_WORDLIST
 
   var entropyBuffer = new Buffer(entropy, 'hex')
@@ -75,24 +62,31 @@ function entropyToMnemonic (entropy, wordlist) {
   var bits = entropyBits + checksum
   var chunks = bits.match(/(.{1,11})/g)
 
-  var words = chunks.map(function (binary) {
+  var words = chunks.map(function(binary) {
     var index = parseInt(binary, 2)
 
     return wordlist[index]
   })
 
-  return wordlist === JAPANESE_WORDLIST ? words.join('\u3000') : words.join(' ')
+  return words.join(' ')
 }
 
-function generateMnemonic (strength, rng, wordlist) {
-  strength = strength || 128
-  rng = rng || randomBytes
+function generateMnemonic(strength, rng, wordlist) {
+  return new Promise((resolve, reject) => {
+    strength = strength || 128
+    rng = rng || randomBytes
 
-  var hex = rng(strength / 8).toString('hex')
-  return entropyToMnemonic(hex, wordlist)
+    rng(strength / 8, (error, randomBytesBuffer) => {
+      if (error) {
+        reject(error)
+      } else {
+        resolve(entropyToMnemonic(randomBytesBuffer.toString('hex'), wordlist))
+      }
+    })
+  })
 }
 
-function validateMnemonic (mnemonic, wordlist) {
+function validateMnemonic(mnemonic, wordlist) {
   try {
     mnemonicToEntropy(mnemonic, wordlist)
   } catch (e) {
@@ -102,7 +96,7 @@ function validateMnemonic (mnemonic, wordlist) {
   return true
 }
 
-function checksumBits (entropyBuffer) {
+function checksumBits(entropyBuffer) {
   var hash = createHash('sha256').update(entropyBuffer).digest()
 
   // Calculated constants from BIP39
@@ -112,17 +106,21 @@ function checksumBits (entropyBuffer) {
   return bytesToBinary([].slice.call(hash)).slice(0, CS)
 }
 
-// =========== helper methods from bitcoinjs-lib ========
-
-function bytesToBinary (bytes) {
-  return bytes.map(function (x) {
-    return lpad(x.toString(2), '0', 8)
-  }).join('')
+function salt(password) {
+  return 'mnemonic' + (unorm.nfkd(password) || '') // Use unorm until String.prototype.normalize gets better browser support
 }
 
-function lpad (str, padString, length) {
-  while (str.length < length) str = padString + str
-  return str
+//=========== helper methods from bitcoinjs-lib ========
+
+function bytesToBinary(bytes) {
+  return bytes.map(function(x) {
+    return lpad(x.toString(2), '0', 8)
+  }).join('');
+}
+
+function lpad(str, padString, length) {
+  while (str.length < length) str = padString + str;
+  return str;
 }
 
 module.exports = {
@@ -133,7 +131,6 @@ module.exports = {
   generateMnemonic: generateMnemonic,
   validateMnemonic: validateMnemonic,
   wordlists: {
-    EN: DEFAULT_WORDLIST,
-    JA: JAPANESE_WORDLIST
+    EN: DEFAULT_WORDLIST
   }
 }

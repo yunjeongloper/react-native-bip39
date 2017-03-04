@@ -5,8 +5,6 @@
   "main": "index.js",
   "scripts": {
     "standard": "standard"
-    // "test": "npm run standard && npm run unit",
-    // "unit": "tape test/*.js"
   },
   "author": "Alberto Dallaporta",
   "contributors": [

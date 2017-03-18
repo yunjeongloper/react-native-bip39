@@ -1,8 +1,8 @@
-var assert = require('assert')
-var createHash = require('create-hash')
-var pbkdf2 = require('react-native-crypto').pbkdf2Sync
-var randomBytes = require('react-native-randombytes').randomBytes
 var unorm = require('unorm')
+var assert = require('assert')
+var pbkdf2 = require('react-native-crypto').pbkdf2Sync
+var createHash = require('react-native-crypto').createHash
+var randomBytes = require('react-native-randombytes').randomBytes
 
 var DEFAULT_WORDLIST = require('./wordlists/en.json')
 
